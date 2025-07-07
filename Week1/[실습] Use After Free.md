@@ -346,12 +346,55 @@ payload 에 추가할 것들
 + system 함수 주소
 ```
 <br>
-지금 상황에서 리턴 가젯과 binsh는 절대주소니까 system 함수만 찾아주면 된다.
+지금 상황에서 리턴 가젯과 binsh는 절대주소니까 system 함수만 찾아주면 된다.  
 
-그럼 이제 system 함수 주소를 찾기 위해서 libc의 베이스 주소를 알아내보자 .... 아오
+그럼 이제 system 함수 주소를 찾기 위해서 libc의 베이스 주소를 알아내보자  
+
+<br>
+
+libc 주소를 얻어야하는데, ptmalloc2의 unsorted bin 취약점을 이용해보자.    
+unsorted bin 연결 시 fd/bk 필드에 libc 주소가 들어가게 된다.    
+큰 청크를 해제하면 unsorted bin에 들어가는데, 이때 fd와 bk 필드에 libc 내부의 주소들이 저장된다.   
+이 주소를 읽어내면 libc base 주소를 계산할 수 있다.   
+
+![image](https://github.com/user-attachments/assets/981c6ae8-2b5e-46ae-8383-509fe7119c73)
+
+이렇게 1280으로 할당한 각 공간들의 상태를 확인해보면,   
+
+<br>
+
+![image](https://github.com/user-attachments/assets/f0f82be8-f567-4dac-a747-d93a023084d6)
+
+그리고 해당 `fd`와 `bk` 주소인 `0x7ffff7dcdca0`을 살펴보면,    
+
+`/lib/x86_64-linux-gnu/libc-2.27.so`로 `libc` 파일에 들어있는 것을 알 수 있다.  
+
+<br>
+
+![image](https://github.com/user-attachments/assets/758ba2e1-2b96-46c4-9ce2-9dd5e06cea51)
+
+
+이곳에서 `libc`가 매핑된 주소를 찾아준 뒤 빼주면 베이스 주소를 알아낼 수 있다.    
+
+- `0x7ffff79e2000     0x7ffff7bc9000 r-xp   1e7000      0 /lib/x86_64-linux-gnu/libc-2.27.so`
+- 주소: `0x7ffff79e2000`  
+
+```bash
+pwndbg> p/x 0x7ffff7dcdca0 - 0x7ffff79e2000
+$1 = 0x3ebca0
+```
+
+이런 식으로 베이스 주소의 오프셋을 구했다.  
+
 
 <br>
 
 
 
+![image](https://github.com/user-attachments/assets/054ecbec-7ac7-4a49-ab6a-fdeb583e96b8)
 
+그리고  해제한 청크에 다시 Z 단일 문자열을 넣었더니   
+0x7ffff7dcdca0 → 0x7ffff7dc0a5a 로 변했다.   
+
+
+libc base랑 offset은 구햇는데 가젯쓰는게아닌듯
