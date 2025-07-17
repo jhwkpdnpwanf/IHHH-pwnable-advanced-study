@@ -1,6 +1,6 @@
 # 도움 링크들
 
-###  x86_64 아키텍처에서 시스템 콜 번호 & 인자  
+###  x86_64 아키텍처 시스템 콜 번호 & 인자  
 https://blog.rchapman.org/posts/Linux_System_Call_Table_for_x86_64/
 
 <br>
