@@ -16,6 +16,35 @@ https://linux.die.net/
 <br>
 <br>
 
+### patchelf로 로더 패치
+
+로더 버전이 맞는지 확인할 때 명령어이다.  
+같은 디렉토리안에 있는 .so 파일과 비교할 때이다. (ex. `ld-2.27.so`)   
+
+```bash
+root@c6d07003e850:~/rtld_global# md5sum ld-2.27.so
+ecedcc8d1cac4f344f2e2d0564ff67ab  ld-2.27.so
+
+root@c6d07003e850:~/rtld_global# md5sum /lib64/ld-linux-x86-64.so.2
+bd1331eea9e034eb3d661990e25037b7  /lib64/ld-linux-x86-64.so.2
+
+root@c6d07003e850:~/rtld_global# readelf -s ld-2.27.so | grep " _rtld_global@"
+    25: 0000000000228060  3960 OBJECT  GLOBAL DEFAULT   21 _rtld_global@@GLIBC_PRIVATE
+    
+root@c6d07003e850:~/rtld_global# readelf -s /lib64/ld-linux-x86-64.so.2 | grep " _rtld_global@"
+    25: 000000000022a060  3960 OBJECT  GLOBAL DEFAULT   21 _rtld_global@@GLIBC_PRIVATE
+```
+
+추가로 vmmap으로도 확인가능하다.  
+
+이렇게 다른 것을 확인했다면   
+```bash
+patchelf --set-interpreter ./ld-2.27.so ./ow_rtld
+```
+이렇게 바꿔줄 수 있다.  
+
+<br>
+<br>
 
 ### 덤프 코어 파일 생성 & 확인
 ```bash
