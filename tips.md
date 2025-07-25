@@ -16,6 +16,15 @@ https://linux.die.net/
 <br>
 <br>
 
+### libc 파일 설정
+
+```bash
+export LD_PRELOAD=$(realpath ./libc-2.27.so)
+```
+
+<br>
+<br>
+
 ### patchelf로 로더 패치
 
 로더 버전이 맞는지 확인할 때 명령어이다.  
